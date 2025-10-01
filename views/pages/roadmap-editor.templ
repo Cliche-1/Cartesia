@@ -1,0 +1,554 @@
+package pages
+
+import "Gin/views/layouts"
+import "Gin/views/components"
+
+templ RoadmapEditor(title string, roadmapId string) {
+    @layouts.Base(title, components.Container(editorContent(roadmapId)))
+}
+
+script alpineInit() {
+    return `
+        function editorState() {
+            return {
+                nodes: [],
+                selectedNode: null,
+                connections: [],
+                undoStack: [],
+                redoStack: [],
+                isDragging: false,
+                isConnecting: false,
+                zoom: 1,
+                gridSnap: true,
+                showMinimap: false,
+                selectedTab: 'properties',
+                roadmapTitle: '',
+                roadmapDescription: '',
+                roadmapCategory: '',
+                isPublic: false,
+                connectionPreview: { x: 0, y: 0 },
+                
+                init() {
+                    this.loadRoadmap()
+                    this.setupAutosave()
+                    this.setupKeyboardShortcuts()
+                },
+
+                loadRoadmap() {
+                    htmx.ajax('GET', '/api/roadmaps/' + roadmapId, {
+                        target: '#editor-state',
+                        swap: 'none',
+                        handler: (resp) => {
+                            const data = JSON.parse(resp)
+                            this.nodes = data.nodes
+                            this.connections = data.connections
+                            this.roadmapTitle = data.title
+                            this.roadmapDescription = data.description
+                            this.roadmapCategory = data.category
+                            this.isPublic = data.is_public
+                        }
+                    })
+                },
+
+                setupAutosave() {
+                    let timeout
+                    const save = () => {
+                        const data = {
+                            nodes: this.nodes,
+                            connections: this.connections,
+                            title: this.roadmapTitle,
+                            description: this.roadmapDescription,
+                            category: this.roadmapCategory,
+                            is_public: this.isPublic
+                        }
+                        htmx.ajax('PUT', '/api/roadmaps/' + roadmapId, {
+                            values: data,
+                            handler: () => console.log('Cambios guardados')
+                        })
+                    }
+
+                    this.$watch(['nodes', 'connections', 'roadmapTitle', 'roadmapDescription', 'roadmapCategory', 'isPublic'], () => {
+                        clearTimeout(timeout)
+                        timeout = setTimeout(save, 2000)
+                    })
+                },
+
+                setupKeyboardShortcuts() {
+                    document.addEventListener('keydown', (e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                            e.preventDefault()
+                            this.undo()
+                        }
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+                            e.preventDefault()
+                            this.redo()
+                        }
+                        if (e.key === 'Delete' && this.selectedNode) {
+                            e.preventDefault()
+                            this.deleteNode(this.selectedNode)
+                        }
+                    })
+                },
+
+                addNode(x, y) {
+                    const node = {
+                        id: Date.now().toString(),
+                        title: 'Nuevo nodo',
+                        description: '',
+                        type: 'topic',
+                        color: '#4F46E5',
+                        position: { x, y }
+                    }
+                    this.pushToHistory()
+                    this.nodes.push(node)
+                    this.selectedNode = node
+                },
+
+                updateNode(node, changes) {
+                    this.pushToHistory()
+                    Object.assign(node, changes)
+                },
+
+                deleteNode(node) {
+                    this.pushToHistory()
+                    this.nodes = this.nodes.filter(n => n.id !== node.id)
+                    this.connections = this.connections.filter(
+                        c => c.fromNodeId !== node.id && c.toNodeId !== node.id
+                    )
+                    this.selectedNode = null
+                },
+
+                startDrag(node, event) {
+                    if (this.isConnecting) return
+                    
+                    this.isDragging = true
+                    const startX = event.clientX
+                    const startY = event.clientY
+                    const startPos = { ...node.position }
+                    
+                    const onMouseMove = (e) => {
+                        if (!this.isDragging) return
+                        
+                        let deltaX = (e.clientX - startX) / this.zoom
+                        let deltaY = (e.clientY - startY) / this.zoom
+                        
+                        if (this.gridSnap) {
+                            deltaX = Math.round(deltaX / 40) * 40
+                            deltaY = Math.round(deltaY / 40) * 40
+                        }
+                        
+                        node.position = {
+                            x: startPos.x + deltaX,
+                            y: startPos.y + deltaY
+                        }
+                    }
+                    
+                    const onMouseUp = () => {
+                        this.isDragging = false
+                        document.removeEventListener('mousemove', onMouseMove)
+                        document.removeEventListener('mouseup', onMouseUp)
+                        this.pushToHistory()
+                    }
+                    
+                    document.addEventListener('mousemove', onMouseMove)
+                    document.addEventListener('mouseup', onMouseUp)
+                },
+
+                startConnection(node) {
+                    this.isConnecting = true
+                    this.connectionStart = node
+                },
+
+                updateConnectionPreview(event) {
+                    const rect = event.target.getBoundingClientRect()
+                    this.connectionPreview = {
+                        x: (event.clientX - rect.left) / this.zoom,
+                        y: (event.clientY - rect.top) / this.zoom
+                    }
+                },
+
+                completeConnection(node) {
+                    if (this.connectionStart && this.connectionStart !== node) {
+                        this.pushToHistory()
+                        this.connections.push({
+                            id: Date.now().toString(),
+                            fromNodeId: this.connectionStart.id,
+                            toNodeId: node.id,
+                            type: 'default'
+                        })
+                    }
+                    this.isConnecting = false
+                    this.connectionStart = null
+                },
+
+                deleteConnection(conn) {
+                    this.pushToHistory()
+                    this.connections = this.connections.filter(c => c.id !== conn.id)
+                },
+
+                getNodeById(id) {
+                    return this.nodes.find(n => n.id === id)
+                },
+
+                getConnectionClass(type) {
+                    return type === 'default' ? 'stroke-gray-400' : 'stroke-blue-500'
+                },
+
+                pushToHistory() {
+                    this.undoStack.push({
+                        nodes: JSON.parse(JSON.stringify(this.nodes)),
+                        connections: JSON.parse(JSON.stringify(this.connections))
+                    })
+                    this.redoStack = []
+                },
+
+                undo() {
+                    if (this.undoStack.length > 0) {
+                        const state = this.undoStack.pop()
+                        this.redoStack.push({
+                            nodes: this.nodes,
+                            connections: this.connections
+                        })
+                        this.nodes = state.nodes
+                        this.connections = state.connections
+                    }
+                },
+
+                redo() {
+                    if (this.redoStack.length > 0) {
+                        const state = this.redoStack.pop()
+                        this.undoStack.push({
+                            nodes: this.nodes,
+                            connections: this.connections
+                        })
+                        this.nodes = state.nodes
+                        this.connections = state.connections
+                    }
+                },
+
+                zoomIn() {
+                    this.zoom = Math.min(2, this.zoom + 0.1)
+                },
+
+                zoomOut() {
+                    this.zoom = Math.max(0.5, this.zoom - 0.1)
+                },
+
+                resetZoom() {
+                    this.zoom = 1
+                },
+
+                toggleGrid() {
+                    this.gridSnap = !this.gridSnap
+                },
+
+                toggleMinimap() {
+                    this.showMinimap = !this.showMinimap
+                }
+            }
+        }
+    `
+}
+
+templ editorContent(roadmapId string) {
+    <div class="h-screen flex flex-col" x-data="editorState" x-init="init">
+        <!-- Toolbar -->
+        <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <!-- Acciones principales -->
+                    <button class="btn-primary" @click="saveRoadmap">
+                        <i class="fas fa-save mr-2"></i>
+                        Guardar
+                    </button>
+                    <button class="btn-secondary" @click="previewRoadmap">
+                        <i class="fas fa-eye mr-2"></i>
+                        Vista previa
+                    </button>
+                    <button class="btn-secondary" @click="publishRoadmap">
+                        <i class="fas fa-globe mr-2"></i>
+                        Publicar
+                    </button>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <!-- Herramientas de edición -->
+                    <button class="btn-icon" @click="undo" :disabled="undoStack.length === 0">
+                        <i class="fas fa-undo"></i>
+                    </button>
+                    <button class="btn-icon" @click="redo" :disabled="redoStack.length === 0">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                    <div class="border-l border-gray-300 dark:border-gray-600 h-6 mx-2"></div>
+                    <button class="btn-icon" @click="zoomIn">
+                        <i class="fas fa-search-plus"></i>
+                    </button>
+                    <button class="btn-icon" @click="zoomOut">
+                        <i class="fas fa-search-minus"></i>
+                    </button>
+                    <button class="btn-icon" @click="resetZoom">
+                        <i class="fas fa-expand"></i>
+                    </button>
+                    <div class="border-l border-gray-300 dark:border-gray-600 h-6 mx-2"></div>
+                    <button class="btn-icon" :class="{ 'text-blue-500': gridSnap }" @click="toggleGrid">
+                        <i class="fas fa-th"></i>
+                    </button>
+                    <button class="btn-icon" :class="{ 'text-blue-500': showMinimap }" @click="toggleMinimap">
+                        <i class="fas fa-map"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Contenedor principal -->
+        <div class="flex-1 flex">
+            <!-- Canvas -->
+            <div class="flex-1 bg-gray-50 dark:bg-gray-900 overflow-hidden relative"
+                @click.self="addNode($event.offsetX, $event.offsetY)"
+                @mousemove="updateConnectionPreview($event)"
+                :style="{ transform: 'scale(' + zoom + ')' }">
+                
+                <!-- Grid (si está activado) -->
+                <div class="absolute inset-0 pointer-events-none"
+                    x-show="gridSnap"
+                    style="background-size: 40px 40px; background-image: radial-gradient(circle, #9CA3AF 1px, transparent 1px);">
+                </div>
+
+                <!-- Nodos -->
+                <template x-for="node in nodes" :key="node.id">
+                    <div class="absolute p-4 bg-white dark:bg-gray-800 rounded-lg shadow-lg cursor-move"
+                        :class="{ 'ring-2 ring-blue-500': selectedNode?.id === node.id }"
+                        :style="{ left: node.position.x + 'px', top: node.position.y + 'px' }"
+                        @mousedown="startDrag(node, $event)"
+                        @click.stop="selectedNode = node; selectedTab = 'properties'">
+                        
+                        <div class="flex items-center justify-between">
+                            <h3 class="font-medium" x-text="node.title"></h3>
+                            <div class="flex items-center space-x-2">
+                                <button class="text-gray-500 hover:text-blue-500"
+                                    @click.stop="startConnection(node)">
+                                    <i class="fas fa-link"></i>
+                                </button>
+                                <button class="text-gray-500 hover:text-red-500"
+                                    @click.stop="deleteNode(node)">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-2"
+                            x-text="node.description"></p>
+                            
+                        <!-- Indicador de tipo de nodo -->
+                        <div class="absolute -top-2 -right-2 w-4 h-4 rounded-full"
+                            :style="{ backgroundColor: node.color }"></div>
+                    </div>
+                </template>
+
+                <!-- Conexiones -->
+                <svg class="absolute inset-0 pointer-events-none">
+                    <template x-for="conn in connections" :key="conn.id">
+                        <g>
+                            <path :d="getConnectionPath(conn)"
+                                :class="getConnectionClass(conn.type)"
+                                fill="none"
+                                stroke-width="2"></path>
+                            <circle :cx="getConnectionMidpoint(conn).x"
+                                :cy="getConnectionMidpoint(conn).y"
+                                r="4"
+                                :class="getConnectionClass(conn.type)"
+                                fill="currentColor"
+                                @click.stop="deleteConnection(conn)"
+                                style="cursor: pointer;"></circle>
+                        </g>
+                    </template>
+
+                    <!-- Previsualización de conexión -->
+                    <path x-show="isConnecting"
+                        :d="getPreviewPath()"
+                        class="stroke-blue-500"
+                        fill="none"
+                        stroke-width="2"
+                        stroke-dasharray="4"></path>
+                </svg>
+
+                <!-- Minimap -->
+                <div x-show="showMinimap"
+                    class="absolute bottom-4 right-4 w-64 h-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-2">
+                    <!-- Implementar minimap aquí -->
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex flex-col">
+                <!-- Tabs -->
+                <div class="border-b border-gray-200 dark:border-gray-700">
+                    <nav class="flex">
+                        <button class="flex-1 py-3 px-4 text-center border-b-2"
+                            :class="selectedTab === 'properties' ? 'border-blue-500 text-blue-500' : 'border-transparent'"
+                            @click="selectedTab = 'properties'">
+                            Propiedades
+                        </button>
+                        <button class="flex-1 py-3 px-4 text-center border-b-2"
+                            :class="selectedTab === 'resources' ? 'border-blue-500 text-blue-500' : 'border-transparent'"
+                            @click="selectedTab = 'resources'">
+                            Recursos
+                        </button>
+                        <button class="flex-1 py-3 px-4 text-center border-b-2"
+                            :class="selectedTab === 'settings' ? 'border-blue-500 text-blue-500' : 'border-transparent'"
+                            @click="selectedTab = 'settings'">
+                            Ajustes
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Panel de propiedades -->
+                <div x-show="selectedTab === 'properties'" class="flex-1 p-4 overflow-y-auto">
+                    <template x-if="selectedNode">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Título</label>
+                                <input type="text"
+                                    class="form-input w-full"
+                                    x-model="selectedNode.title"
+                                    @change="updateNode(selectedNode, { title: $event.target.value })">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Descripción</label>
+                                <textarea
+                                    class="form-textarea w-full"
+                                    rows="3"
+                                    x-model="selectedNode.description"
+                                    @change="updateNode(selectedNode, { description: $event.target.value })"></textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Tipo</label>
+                                <select class="form-select w-full"
+                                    x-model="selectedNode.type"
+                                    @change="updateNode(selectedNode, { type: $event.target.value })">
+                                    <option value="topic">Tema</option>
+                                    <option value="skill">Habilidad</option>
+                                    <option value="project">Proyecto</option>
+                                    <option value="resource">Recurso</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Color</label>
+                                <div class="flex space-x-2">
+                                    <template x-for="color in ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']">
+                                        <button class="w-8 h-8 rounded-full"
+                                            :style="{ backgroundColor: color }"
+                                            :class="{ 'ring-2 ring-offset-2': selectedNode.color === color }"
+                                            @click="updateNode(selectedNode, { color: color })"></button>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!selectedNode">
+                        <div class="text-center text-gray-500 dark:text-gray-400 py-8">
+                            <i class="fas fa-mouse-pointer text-4xl mb-2"></i>
+                            <p>Selecciona un nodo para editar sus propiedades</p>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Panel de recursos -->
+                <div x-show="selectedTab === 'resources'" class="flex-1 p-4 overflow-y-auto">
+                    <template x-if="selectedNode">
+                        <div class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <h3 class="font-medium">Recursos del nodo</h3>
+                                <button class="btn-secondary" @click="addResource">
+                                    <i class="fas fa-plus mr-2"></i>
+                                    Agregar
+                                </button>
+                            </div>
+                            <template x-for="resource in selectedNode.resources" :key="resource.id">
+                                <div class="bg-gray-50 dark:bg-gray-900 p-3 rounded-lg">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <h4 class="font-medium" x-text="resource.title"></h4>
+                                            <p class="text-sm text-gray-600 dark:text-gray-400"
+                                                x-text="resource.type"></p>
+                                        </div>
+                                        <button class="text-gray-500 hover:text-red-500"
+                                            @click="removeResource(resource)">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                    <template x-if="!selectedNode">
+                        <div class="text-center text-gray-500 dark:text-gray-400 py-8">
+                            <i class="fas fa-book text-4xl mb-2"></i>
+                            <p>Selecciona un nodo para gestionar sus recursos</p>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Panel de ajustes -->
+                <div x-show="selectedTab === 'settings'" class="flex-1 p-4 overflow-y-auto">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Título del roadmap</label>
+                            <input type="text"
+                                class="form-input w-full"
+                                x-model="roadmapTitle">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Descripción</label>
+                            <textarea
+                                class="form-textarea w-full"
+                                rows="3"
+                                x-model="roadmapDescription"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Categoría</label>
+                            <select class="form-select w-full"
+                                x-model="roadmapCategory">
+                                <option value="">Selecciona una categoría</option>
+                                <option value="programming">Programación</option>
+                                <option value="design">Diseño</option>
+                                <option value="business">Negocios</option>
+                                <option value="other">Otro</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox"
+                                class="form-checkbox"
+                                x-model="isPublic">
+                            <label class="ml-2">Hacer público este roadmap</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .bg-grid {
+            background-size: 40px 40px;
+            background-image: 
+                linear-gradient(to right, rgba(128, 128, 128, 0.1) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(128, 128, 128, 0.1) 1px, transparent 1px);
+        }
+
+        .btn-primary {
+            @apply inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
+        }
+
+        .btn-secondary {
+            @apply inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600;
+        }
+
+        .btn-danger {
+            @apply inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500;
+        }
+
+        .icon-btn {
+            @apply p-2 text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:text-gray-400 dark:hover:text-gray-300;
+        }
+    </style>
+}

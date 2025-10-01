@@ -26,6 +26,7 @@ type Node struct {
 	Type        NodeType  `json:"type"`
 	Position    Position  `json:"position"`
 	Status      string    `json:"status"`
+	Color       string    `json:"color"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -48,14 +49,25 @@ type Position struct {
 
 // Connection representa una conexión entre dos nodos
 type Connection struct {
-	ID          int64     `json:"id"`
-	RoadmapID   int64     `json:"roadmap_id"`
-	FromNodeID  int64     `json:"from_node_id"`
-	ToNodeID    int64     `json:"to_node_id"`
-	Label       string    `json:"label,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             int64          `json:"id"`
+	RoadmapID      int64          `json:"roadmap_id"`
+	FromNodeID     int64          `json:"from_node_id"`
+	ToNodeID       int64          `json:"to_node_id"`
+	Label          string         `json:"label,omitempty"`
+	ConnectionType ConnectionType `json:"connection_type"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
 }
+
+// ConnectionType representa el tipo de conexión entre nodos
+type ConnectionType string
+
+const (
+	ConnectionTypeDefault ConnectionType = "default"
+	ConnectionTypeStrong  ConnectionType = "strong"
+	ConnectionTypeWeak    ConnectionType = "weak"
+	ConnectionTypeDashed  ConnectionType = "dashed"
+)
 
 // Resource representa un recurso asociado a un nodo
 type Resource struct {
@@ -89,4 +101,55 @@ type Progress struct {
 	Notes     string    `json:"notes,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Props para las vistas
+type RoadmapDetailProps struct {
+	ID          string
+	Title       string
+	Description string
+	Author      struct {
+		ID        string
+		Name      string
+		AvatarURL string
+	}
+	Stats struct {
+		Views     int
+		Forks     int
+		Favorites int
+	}
+	Nodes     []RoadmapNodeProps
+	Resources []ResourceProps
+	Reviews   []ReviewProps
+}
+
+type RoadmapNodeProps struct {
+	ID          string
+	Title       string
+	Description string
+	Type        string
+	PositionX   float64
+	PositionY   float64
+	Status      string
+	Connections []struct {
+		TargetID string
+		Type     string
+	}
+}
+
+type ResourceProps struct {
+	ID          string
+	Title       string
+	Type        string // "link", "video", "document"
+	URL         string
+	Description string
+}
+
+type ReviewProps struct {
+	ID        string
+	UserName  string
+	AvatarURL string
+	Rating    int
+	Comment   string
+	CreatedAt string
 }

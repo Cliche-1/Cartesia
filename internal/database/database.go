@@ -3,16 +3,16 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 
 	_ "github.com/lib/pq"
 )
 
-var db *sql.DB
+type DB struct {
+	*sql.DB
+}
 
-// InitDB inicializa la conexión a la base de datos
-func InitDB() (*sql.DB, error) {
+func Connect() (*DB, error) {
 	// Obtener variables de entorno
 	host := os.Getenv("DB_HOST")
 	port := os.Getenv("DB_PORT")
@@ -21,35 +21,53 @@ func InitDB() (*sql.DB, error) {
 	dbname := os.Getenv("DB_NAME")
 
 	// Construir string de conexión
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
+	connStr := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname,
+	)
 
 	// Abrir conexión
-	var err error
-	db, err = sql.Open("postgres", connStr)
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		return nil, fmt.Errorf("error al abrir conexión con la base de datos: %v", err)
+		return nil, fmt.Errorf("error al abrir conexión: %v", err)
 	}
 
 	// Verificar conexión
-	err = db.Ping()
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("error al verificar conexión: %v", err)
+	}
+
+	return &DB{db}, nil
+}
+
+// GetDB retorna la conexión a la base de datos
+func (db *DB) GetDB() *sql.DB {
+	return db.DB
+}
+
+// Close cierra la conexión a la base de datos
+func (db *DB) Close() error {
+	return db.DB.Close()
+}
+
+// Transaction ejecuta una función dentro de una transacción
+func (db *DB) Transaction(fn func(*sql.Tx) error) error {
+	tx, err := db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("error al verificar conexión con la base de datos: %v", err)
+		return err
 	}
 
-	log.Println("Conexión exitosa con la base de datos")
-	return db, nil
-}
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p)
+		}
+	}()
 
-// GetDB retorna la instancia de la base de datos
-func GetDB() *sql.DB {
-	return db
-}
-
-// CloseDB cierra la conexión con la base de datos
-func CloseDB() error {
-	if db != nil {
-		return db.Close()
+	if err := fn(tx); err != nil {
+		tx.Rollback()
+		return err
 	}
-	return nil
+
+	return tx.Commit()
 }

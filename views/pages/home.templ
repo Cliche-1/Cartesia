@@ -1,7 +1,10 @@
 package pages
 
+import "Gin/views/components"
+
 templ Home() {
     <div class="max-w-7xl mx-auto">
+        @components.AuthModal()
         // Hero Section
         <section class="text-center py-16 px-4 sm:px-6 lg:px-8">
             <h1 class="text-4xl tracking-tight font-extrabold text-gray-900 dark:text-white sm:text-5xl md:text-6xl">

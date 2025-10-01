@@ -1,91 +1,77 @@
 package middleware
 
 import (
-	"fmt"
+	"Gin/internal/services"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
-// AuthRequired es un middleware que verifica el token JWT
-func AuthRequired() gin.HandlerFunc {
+const (
+	AuthorizationHeader = "Authorization"
+	UserIDKey          = "user_id"
+)
+
+type AuthMiddleware struct {
+	jwtService *services.JWTService
+}
+
+func NewAuthMiddleware(jwtService *services.JWTService) *AuthMiddleware {
+	return &AuthMiddleware{
+		jwtService: jwtService,
+	}
+}
+
+// RequireAuth verifica que el token JWT sea válido
+func (m *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Obtener el token del header Authorization
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token no proporcionado"})
-			c.Abort()
+		header := c.GetHeader(AuthorizationHeader)
+		if header == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Se requiere autenticación",
+			})
 			return
 		}
 
-		// El token debe estar en formato "Bearer <token>"
-		tokenParts := strings.Split(authHeader, " ")
-		if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Formato de token inválido"})
-			c.Abort()
+		// Extraer el token del header "Bearer <token>"
+		tokenParts := strings.Split(header, " ")
+		if len(tokenParts) != 2 || strings.ToLower(tokenParts[0]) != "bearer" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Formato de token inválido",
+			})
 			return
 		}
 
 		// Validar el token
-		token, err := validateToken(tokenParts[1])
+		userID, err := m.jwtService.ValidateToken(tokenParts[1])
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
-			c.Abort()
+			status := http.StatusUnauthorized
+			message := "Token inválido"
+
+			if err == services.ErrExpiredToken {
+				message = "Token expirado"
+			}
+
+			c.AbortWithStatusJSON(status, gin.H{
+				"error": message,
+			})
 			return
 		}
 
-		// Si el token es válido, obtener los claims
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// Guardar el ID del usuario en el contexto
-			c.Set("user_id", claims["user_id"])
-			c.Next()
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
-			c.Abort()
-			return
-		}
+		// Guardar el user_id en el contexto
+		c.Set(UserIDKey, userID)
+		c.Next()
 	}
 }
 
-// validateToken valida un token JWT
-func validateToken(tokenString string) (*jwt.Token, error) {
-	// Obtener la clave secreta desde las variables de entorno
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		return nil, fmt.Errorf("JWT_SECRET no está configurado")
+// GetUserID obtiene el ID del usuario del contexto
+func GetUserID(c *gin.Context) (int64, bool) {
+	userID, exists := c.Get(UserIDKey)
+	if !exists {
+		return 0, false
 	}
 
-	// Parsear y validar el token
-	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Verificar que el método de firma sea el correcto
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("método de firma inesperado: %v", token.Header["alg"])
-		}
-
-		return []byte(secret), nil
-	})
-}
-
-// GenerateToken genera un nuevo token JWT para un usuario
-func GenerateToken(userID int64) (string, error) {
-	// Obtener la clave secreta desde las variables de entorno
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		return "", fmt.Errorf("JWT_SECRET no está configurado")
-	}
-
-	// Crear los claims del token
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"exp":     jwt.NewNumericDate(jwt.TimeFunc().Add(jwt.DefaultLeeway)),
-	}
-
-	// Crear el token
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	// Firmar el token con la clave secreta
-	return token.SignedString([]byte(secret))
+	id, ok := userID.(int64)
+	return id, ok
 }

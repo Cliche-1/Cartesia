@@ -1,0 +1,150 @@
+package components
+
+import (
+    "Gin/internal/models"
+)
+
+script initRoadmapViewer(nodes []models.RoadmapNodeProps) {
+    return {
+        nodes: nodes,
+        selectedNode: null,
+        isDragging: false,
+        draggedNode: null,
+        dragOffset: { x: 0, y: 0 },
+        scale: 1,
+        viewBox: { x: 0, y: 0 },
+        
+        init() {
+            this.$el.addEventListener('wheel', function(e) {
+                if (e.ctrlKey) {
+                    e.preventDefault();
+                    this.scale = Math.min(Math.max(0.5, this.scale * (e.deltaY > 0 ? 0.9 : 1.1)), 2);
+                }
+            }.bind(this));
+        },
+
+        startDrag(node, event) {
+            if (!this.isDragging) {
+                this.isDragging = true;
+                this.draggedNode = node;
+                const rect = event.target.getBoundingClientRect();
+                this.dragOffset = {
+                    x: event.clientX - rect.left,
+                    y: event.clientY - rect.top
+                };
+            }
+        },
+
+        drag(event) {
+            if (this.isDragging && this.draggedNode) {
+                this.draggedNode.PositionX = (event.clientX - this.dragOffset.x - this.viewBox.x) / this.scale;
+                this.draggedNode.PositionY = (event.clientY - this.dragOffset.y - this.viewBox.y) / this.scale;
+            }
+        },
+
+        endDrag() {
+            this.isDragging = false;
+            this.draggedNode = null;
+        },
+
+        getTargetNode(id) {
+            return this.nodes.find(function(n) { return n.ID === id; });
+        }
+    };
+}
+
+templ RoadmapViewer(nodes []models.RoadmapNodeProps) {
+    <div 
+        class="relative min-h-[600px] w-full"
+        x-data="initRoadmapViewer(nodes)"
+    >
+        <div 
+            class="absolute inset-0 overflow-hidden"
+            :style="`transform: scale(${scale}) translate(${viewBox.x}px, ${viewBox.y}px);`"
+            @mousemove="drag($event)"
+            @mouseup="endDrag()"
+            @mouseleave="endDrag()"
+        >
+            <!-- Conexiones entre nodos -->
+            <template x-for="node in nodes" :key="node.ID">
+                <template x-for="conn in node.Connections" :key="`${node.ID}-${conn.TargetID}`">
+                    <svg class="absolute top-0 left-0 w-full h-full pointer-events-none">
+                        <line
+                            :x1="node.PositionX + 100"
+                            :y1="node.PositionY + 50"
+                            :x2="getTargetNode(conn.TargetID).PositionX"
+                            :y2="getTargetNode(conn.TargetID).PositionY + 50"
+                            stroke="#94a3b8"
+                            stroke-width="2"
+                            :marker-end="conn.Type === 'required' ? 'url(#arrowhead)' : ''"
+                        />
+                        <text
+                            x-show="conn.Type === 'required'"
+                            :x="(node.PositionX + getTargetNode(conn.TargetID).PositionX + 100) / 2"
+                            :y="(node.PositionY + getTargetNode(conn.TargetID).PositionY + 50) / 2 - 10"
+                            class="fill-slate-500 text-sm"
+                            text-anchor="middle"
+                        >
+                            Requerido
+                        </text>
+                    </svg>
+                </template>
+            </template>
+
+            <!-- Definición de marcadores para las flechas -->
+            <svg class="absolute" width="0" height="0">
+                <defs>
+                    <marker
+                        id="arrowhead"
+                        markerWidth="10"
+                        markerHeight="7"
+                        refX="9"
+                        refY="3.5"
+                        orient="auto"
+                    >
+                        <polygon
+                            points="0 0, 10 3.5, 0 7"
+                            fill="#94a3b8"
+                        />
+                    </marker>
+                </defs>
+            </svg>
+
+            <!-- Nodos -->
+            <template x-for="node in nodes" :key="node.ID">
+                <div
+                    class="absolute cursor-move rounded-lg shadow-md transition-transform hover:scale-105"
+                    :class="{
+                        'bg-green-100 dark:bg-green-900': node.Status === 'completed',
+                        'bg-blue-100 dark:bg-blue-900': node.Status === 'in_progress',
+                        'bg-white dark:bg-gray-800': node.Status === 'pending'
+                    }"
+                    :style="`left: ${node.PositionX}px; top: ${node.PositionY}px;`"
+                    @mousedown="startDrag(node, $event)"
+                    @click="selectedNode = node"
+                >
+                    <div class="p-4 w-[200px]">
+                        <h3 
+                            class="font-semibold mb-2"
+                            :class="{
+                                'text-green-700 dark:text-green-300': node.Status === 'completed',
+                                'text-blue-700 dark:text-blue-300': node.Status === 'in_progress',
+                                'text-gray-700 dark:text-gray-300': node.Status === 'pending'
+                            }"
+                            x-text="node.Title"
+                        ></h3>
+                        <p 
+                            class="text-sm"
+                            :class="{
+                                'text-green-600 dark:text-green-400': node.Status === 'completed',
+                                'text-blue-600 dark:text-blue-400': node.Status === 'in_progress',
+                                'text-gray-600 dark:text-gray-400': node.Status === 'pending'
+                            }"
+                            x-text="node.Description"
+                        ></p>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+}
