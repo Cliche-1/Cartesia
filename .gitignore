@@ -1,0 +1,50 @@
+# Binarios y ejecutables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# Archivos de prueba
+*.test
+*.out
+
+# Archivos generados por Go
+*.o
+*.a
+_obj
+_test
+_testmain.go
+
+# Archivos de dependencias
+vendor/
+
+# Archivos de IDE y editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Archivos de entorno
+.env
+
+# Archivos temporales
+tmp/
+temp/
+
+# Archivos generados por templ
+*_templ.go
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Directorios de caché
+.cache/
+Makefile
+node_modules

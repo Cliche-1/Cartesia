@@ -1,0 +1,91 @@
+package layouts
+
+import "Gin/views/components"
+
+templ Base(title string, content templ.Component) {
+    <!DOCTYPE html>
+    <html lang="es" class="h-full">
+        <head>
+            <meta charset="UTF-8"/>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+            <meta name="description" content="Tu aplicación web moderna con Go"/>
+            <meta name="keywords" content="go, web, aplicación, moderna"/>
+            <meta name="author" content="Tu Nombre"/>
+            <meta name="theme-color" content="#3b82f6"/>
+            
+            <title>{ title }</title>
+
+            // TailwindCSS CDN para desarrollo
+            <script src="https://cdn.tailwindcss.com"></script>
+            <script>
+                tailwind.config = {
+                    darkMode: 'class',
+                    theme: {
+                        extend: {
+                            colors: {
+                                primary: {
+                                    50: '#f0f9ff',
+                                    100: '#e0f2fe',
+                                    200: '#bae6fd',
+                                    300: '#7dd3fc',
+                                    400: '#38bdf8',
+                                    500: '#0ea5e9',
+                                    600: '#0284c7',
+                                    700: '#0369a1',
+                                    800: '#075985',
+                                    900: '#0c4a6e',
+                                    950: '#082f49',
+                                },
+                            },
+                        },
+                    },
+                }
+            </script>
+
+            // Alpine.js para interactividad
+            <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+            // HTMX para interacciones dinámicas
+            <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+            // Estilos personalizados
+            <style type="text/css">
+                [x-cloak] { display: none !important; }
+            </style>
+        </head>
+        <body class="h-full bg-gray-50 dark:bg-gray-900" 
+              x-data="{ darkMode: localStorage.getItem('darkMode') === 'true' }" 
+              x-init="$watch('darkMode', val => localStorage.setItem('darkMode', val))"
+              :class="{ 'dark': darkMode }">
+            
+            // Contenedor principal
+            <div class="min-h-full flex flex-col">
+                // Espacio para el navbar (se importará como componente)
+                @components.Navbar()
+
+                // Contenido principal
+                <main class="flex-grow container mx-auto px-4 py-8">
+                    @content
+                </main>
+
+                // Footer
+                <footer class="bg-white dark:bg-gray-800 shadow-inner">
+                    <div class="container mx-auto px-4 py-6">
+                        <p class="text-center text-gray-600 dark:text-gray-400">
+                            © 2024 Tu Aplicación. Todos los derechos reservados.
+                        </p>
+                    </div>
+                </footer>
+            </div>
+
+            // Script para manejar el modo oscuro
+            <script>
+                if (localStorage.getItem('darkMode') === 'true' ||
+                    (!('darkMode' in localStorage) &&
+                    window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                    document.documentElement.classList.add('dark');
+                }
+            </script>
+        </body>
+    </html>
+}

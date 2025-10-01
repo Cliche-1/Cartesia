@@ -1,0 +1,20 @@
+{
+  "name": "go-web-app",
+  "version": "1.0.0",
+  "description": "Aplicación web moderna con Go y TailwindCSS",
+  "scripts": {
+    "tailwind:init": "tailwindcss init -p",
+    "tailwind:watch": "tailwindcss -i ./static/css/input.css -o ./static/css/main.css --watch",
+    "tailwind:build": "tailwindcss -i ./static/css/input.css -o ./static/css/main.css --minify",
+    "dev": "concurrently \"make templ-watch\" \"npm run tailwind:watch\"",
+    "build": "npm run tailwind:build && make templ-generate"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.7",
+    "@tailwindcss/typography": "^0.5.10",
+    "autoprefixer": "^10.4.17",
+    "concurrently": "^8.2.2",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1"
+  }
+}
